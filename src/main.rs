@@ -1,16 +1,18 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
+// https://blog.nindalf.com/posts/implementing-aes/ - credits :)
 
-const SBOX: [u8; 256] = [99, 124, 119, 123, 242, 107, 111, 197, 48, 01, 103, 43, 254, 215, 171, 118, 202, 130, 201, 125, 250, 89, 71, 240, 173, 212, 162, 175, 156, 164, 114, 192, 183, 253, 147, 38, 54, 63, 247, 204, 52, 165, 229, 241, 113, 216, 49, 21, 04, 199, 35, 195, 24, 150, 05, 154, 07, 18, 128, 226, 235, 39, 178, 117, 09, 131, 44, 26, 27, 110, 90, 160, 82, 59, 214, 179, 41, 227, 47, 132, 83, 209, 00, 237, 32, 252, 177, 91, 106, 203, 190, 57, 74, 76, 88, 207, 208, 239, 170, 251, 67, 77, 51, 133, 69, 249, 02, 127, 80, 60, 159, 168, 81, 163, 64, 143, 146, 157, 56, 245, 188, 182, 218, 33, 16, 255, 243, 210, 205, 12, 19, 236, 95, 151, 68, 23, 196, 167, 126, 61, 100, 93, 25, 115, 96, 129, 79, 220, 34, 42, 144, 136, 70, 238, 184, 20, 222, 94, 11, 219, 224, 50, 58, 10, 73, 06, 36, 92, 194, 211, 172, 98, 145, 149, 228, 121, 231, 200, 55, 109, 141, 213, 78, 169, 108, 86, 244, 234, 101, 122, 174, 08, 186, 120, 37, 46, 28, 166, 180, 198, 232, 221, 116, 31, 75, 189, 139, 138, 112, 62, 181, 102, 72, 03, 246, 14, 97, 53, 87, 185, 134, 193, 29, 158, 225, 248, 152, 17, 105, 217, 142, 148, 155, 30, 135, 233, 206, 85, 40, 223, 140, 161, 137, 13, 191, 230, 66, 104, 65, 153, 45, 15, 176, 84, 187, 22];
+mod rsaConstants;
+
+const STATEMATRIX: [u8; 16] = [0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15];
 
 fn main() {
     assert_eq!(shift_rows(&mut [0x8e9f01c6,0x4ddc01c6,0xa15801c6,0xbc9d01c6]),
                                [0x8e9f01c6,0xdc01c64d,0x01c6a158,0xc6bc9d01]);
     assert_eq!(sub_bytes(&mut [0x8e9ff1c6, 0x4ddce1c7, 0xa158d1c8, 0xbc9dc1c9]),
                               [0x19dba1b4, 0xe386f8c6, 0x326a3ee8, 0x655e78dd]);
-
-    // let reversesbox = initialize_aes_sbox(SBOX);
-    // println!("{:02x?}", reversesbox);
+    assert_eq!(mix_columns(&mut [0xdbf201c6,0x130a01c6,0x532201c6,0x455c01c6]),
+                                [0x8e9f01c6,0x4ddc01c6,0xa15801c6,0xbc9d01c6]);
 }
 
 fn initialize_aes_sbox(mut ssbox: [u8; 256]) -> [u8; 256] {
@@ -59,24 +61,21 @@ fn encrypt(state: &mut [u32], expkey: [u32;16], rounds: i32){
     add_round_key(state, &expkey[keyi..keyi+4]);
 }
 
-fn add_round_key(state: &[u32], expkey: &[u32]){
-    unimplemented!();
+fn add_round_key(state: &mut [u32], key: &[u32]){
+    for i in 0..4 {
+        state[i] ^= key[i];
+    }
 }
 
 fn sub_bytes(state: &mut [u32]) -> &[u32] {
-    let mut result: [u32; 4] = [0; 4];
     for i in 0..4 {
         let bytes = state[i].to_be_bytes();
-        result[i] |= (SBOX[bytes[0] as usize] as u32) << 24;
-        result[i] |= (SBOX[bytes[1] as usize] as u32) << 16;
-        result[i] |= (SBOX[bytes[2] as usize] as u32) << 8;
-        result[i] |= SBOX[bytes[3] as usize] as u32;
+        state[i] = 0;
+        state[i] |= (rsaConstants::SBOX[bytes[0] as usize] as u32) << 24;
+        state[i] |= (rsaConstants::SBOX[bytes[1] as usize] as u32) << 16;
+        state[i] |= (rsaConstants::SBOX[bytes[2] as usize] as u32) << 8;
+        state[i] |=  rsaConstants::SBOX[bytes[3] as usize] as u32;
     }
-
-    for i in 0..4 {
-        state[i] = result[i];
-    }
-
     state
 }
 
@@ -91,9 +90,32 @@ fn rot_word_left(st: u32, rotate: u32) -> u32 {
     st << (8 * rotate) | st >> (8 * (4 - rotate))
 }
 
+fn mix_columns(state: &mut [u32]) -> &[u32] {
 
-fn mix_columns(state: &[u32]){
-    unimplemented!();
+    let mixer = |a0: u8,a1: u8,a2: u8,a3: u8| -> (u8, u8, u8, u8) {
+        let r0 = (rsaConstants::GMUL2[a0 as usize] ^ rsaConstants::GMUL3[a1 as usize] ^ a2 ^ a3) as u8;
+        let r1 = (a0 ^ rsaConstants::GMUL2[a1 as usize] ^ rsaConstants::GMUL3[a2 as usize] ^ a3) as u8;
+        let r2 = (a0 ^ a1 ^ rsaConstants::GMUL2[a2 as usize] ^ rsaConstants::GMUL3[a3 as usize]) as u8;
+        let r3 = (rsaConstants::GMUL3[a0 as usize] ^ a1 ^ a2 ^ rsaConstants::GMUL2[a3 as usize]) as u8;
+        (r0, r1, r2, r3)
+    };
+
+    for i in 0..4 {
+        let a0 = ((state[0] >> ((3 - i) * 8)) & 0xff) as u8;
+        let a1 = ((state[1] >> ((3 - i) * 8)) & 0xff) as u8;
+        let a2 = ((state[2] >> ((3 - i) * 8)) & 0xff) as u8;
+        let a3 = ((state[3] >> ((3 - i) * 8)) & 0xff) as u8;
+
+        let (mut r0, mut r1, mut r2, mut r3) = mixer(a0, a1, a2, a3);
+
+        let mut mask: u32 = !(0xff << (3 - i) * 8);
+
+        state[0] = (state[0] & mask) | ((r0 as u32) << ((3 - i) * 8));
+        state[1] = (state[1] & mask) | ((r1 as u32) << ((3 - i) * 8));
+        state[2] = (state[2] & mask) | ((r2 as u32) << ((3 - i) * 8));
+        state[3] = (state[3] & mask) | ((r3 as u32) << ((3 - i) * 8));
+    }
+    state
 }
 
 /*
